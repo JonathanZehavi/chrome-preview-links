@@ -30,3 +30,29 @@ chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
     };
   });
 });
+
+// Claude settings live in storage.local (never synced to your Google account).
+chrome.storage.local.get({ apiKey: "", model: "claude-opus-5-5" }, ({ apiKey, model }) => {
+  const status = $("keyStatus");
+  const showStatus = (has) => (status.textContent = has ? "Key saved ✓" : "No key saved");
+  showStatus(!!apiKey);
+  if (apiKey) $("apiKey").placeholder = "•••••••• (saved, type to replace)";
+  $("model").value = model;
+  $("model").onchange = (e) => chrome.storage.local.set({ model: e.target.value });
+  $("saveKey").onclick = () => {
+    const v = $("apiKey").value.trim();
+    if (!v) {
+      chrome.storage.local.remove("apiKey", () => showStatus(false));
+      return;
+    }
+    if (!v.startsWith("sk-ant-")) {
+      status.textContent = "That doesn't look like a Claude API key (should start with sk-ant-)";
+      return;
+    }
+    chrome.storage.local.set({ apiKey: v }, () => {
+      $("apiKey").value = "";
+      $("apiKey").placeholder = "•••••••• (saved, type to replace)";
+      showStatus(true);
+    });
+  };
+});

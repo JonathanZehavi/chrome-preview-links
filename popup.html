@@ -8,6 +8,11 @@
     label { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 10px 0; }
     .host { color: #666; font-size: 12px; word-break: break-all; }
     input[type=range] { width: 110px; }
+    h2 { font-size: 13px; margin: 16px 0 4px; padding-top: 12px; border-top: 1px solid rgba(128,128,128,.3); }
+    label.col { flex-direction: column; align-items: stretch; gap: 4px; }
+    .row { display: flex; gap: 6px; }
+    #apiKey { flex: 1; min-width: 0; padding: 4px 6px; font: inherit; }
+    button, select { font: inherit; }
     .hint { color: #777; font-size: 11.5px; margin-top: 12px; }
     @media (prefers-color-scheme: dark) { body { background: #1f2023; color: #ececec; } .host, .hint { color: #aaa; } }
   </style>
@@ -18,6 +23,18 @@
   <label><span>On this site<br><span class="host" id="host">—</span></span> <input type="checkbox" id="site"></label>
   <label>Only headline links <input type="checkbox" id="headlinesOnly"></label>
   <label>Hover delay <span><input type="range" id="delay" min="150" max="1500" step="50"> <span id="delayVal"></span></span></label>
+  <h2>TL;DR (Claude)</h2>
+  <label class="col">Claude API key
+    <span class="row"><input type="password" id="apiKey" placeholder="sk-ant-..." autocomplete="off" spellcheck="false"><button id="saveKey" type="button">Save</button></span>
+    <span class="host" id="keyStatus"></span>
+  </label>
+  <label>Model
+    <select id="model">
+      <option value="claude-opus-5-5">Opus 5.5 (best)</option>
+      <option value="claude-haiku-5-5">Haiku 5.5 (cheapest)</option>
+    </select>
+  </label>
+  <div class="hint">Get a key at console.anthropic.com. It's stored only in this browser and sent only to Anthropic. Don't share this extension folder with your key in it.</div>
   <div class="hint">Hover a headline for a moment to see a preview. Press Esc to close it.</div>
   <script src="popup.js"></script>
 </body>

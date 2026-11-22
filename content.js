@@ -92,8 +92,8 @@
     let author = (ld && ld.author) || meta("author") || meta("article:author") || "";
     if (/^https?:/i.test(author)) author = "";
 
-    const paragraphs = extractParagraphs(doc, ld, description);
-    return { title: clean(title), description: clean(description), image, site: clean(site), published, author: clean(author), paragraphs, url: baseUrl };
+    const { paragraphs, fullText } = extractText(doc, ld, description);
+    return { title: clean(title), description: clean(description), image, site: clean(site), published, author: clean(author), paragraphs, fullText, url: baseUrl };
   }
 
   function readJsonLd(doc) {
@@ -126,7 +126,25 @@
     return null;
   }
 
-  function extractParagraphs(doc, ld, description) {
+  // paragraphs: the first few, shown in the card. fullText: the whole article, sent for TL;DR.
+  function extractText(doc, ld, description) {
+    const FULL_LIMIT = 30_000;
+    if (ld && ld.articleBody && ld.articleBody.length > 200) {
+      return { paragraphs: previewParagraphs(ld.articleBody.split(/\n+/), description), fullText: ld.articleBody.slice(0, FULL_LIMIT) };
+    }
+    doc.querySelectorAll("script, style, noscript, nav, footer, header, aside, form, figure, [aria-hidden=true]").forEach((n) => n.remove());
+    const container =
+      doc.querySelector('[itemprop="articleBody"], [data-testid*="article-body" i], .article-body, .article__body, .story-body, .post-content, .entry-content') ||
+      doc.querySelector("article") ||
+      doc.querySelector("main, [role=main]") ||
+      doc.body;
+    if (!container) return { paragraphs: [], fullText: "" };
+    const texts = [...container.querySelectorAll("p, h2, h3, li")].map((n) => clean(n.textContent)).filter((t) => t.length >= 40 && !BOILERPLATE.test(t));
+    const unique = [...new Set(texts)];
+    return { paragraphs: previewParagraphs(unique, description), fullText: unique.join("\n").slice(0, FULL_LIMIT) };
+  }
+
+  function previewParagraphs(candidates, description) {
     const LIMIT = 900;
     const out = [];
     let total = 0;
@@ -139,19 +157,7 @@
       return total >= LIMIT || out.length >= 4;
     };
 
-    if (ld && ld.articleBody && ld.articleBody.length > 200) {
-      for (const t of ld.articleBody.split(/\n+/)) if (push(t)) return out;
-      if (out.length) return out;
-    }
-
-    doc.querySelectorAll("script, style, noscript, nav, footer, header, aside, form, figure, [aria-hidden=true]").forEach((n) => n.remove());
-    const container =
-      doc.querySelector('[itemprop="articleBody"], [data-testid*="article-body" i], .article-body, .article__body, .story-body, .post-content, .entry-content') ||
-      doc.querySelector("article") ||
-      doc.querySelector("main, [role=main]") ||
-      doc.body;
-    if (!container) return out;
-    for (const p of container.querySelectorAll("p")) if (push(p.textContent || "")) break;
+    for (const t of candidates) if (push(t)) break;
     return out;
   }
 
@@ -191,7 +197,7 @@
     card.addEventListener("mouseenter", () => clearTimeout(hideTimer));
     card.addEventListener("mouseleave", () => scheduleHide());
     card.addEventListener("click", (e) => {
-      if (e.target.closest("a")) return;
+      if (e.target.closest("a, button, .tldr")) return;
       if (currentUrl) window.open(currentUrl, e.ctrlKey || e.metaKey ? "_blank" : "_self");
     });
     document.documentElement.appendChild(hostEl);
@@ -237,12 +243,50 @@
       body.append(txt);
     }
     if (!d.title && !d.description && !(d.paragraphs || []).length) body.append(el("div", "err", "This page didn't expose any preview text."));
-    const foot = el("a", "open", "Open article →");
-    foot.href = d.url;
+    const tldrBox = el("div", "tldr");
+    tldrBox.hidden = true;
+    body.append(tldrBox);
+    const foot = el("div", "foot");
+    const open = el("a", "open", "Open article →");
+    open.href = d.url;
+    if ((d.fullText || "").length >= 200) {
+      const btn = el("button", "tldr-btn", "✨ TL;DR");
+      btn.type = "button";
+      btn.title = "Summarize this article with Claude";
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        runTldr(d, btn, tldrBox);
+      });
+      foot.append(btn);
+    }
+    foot.append(open);
     body.append(foot);
     card.append(body);
     // Detect RTL text (Hebrew/Arabic sites)
     card.dir = /[֐-ࣿ]/.test((d.title || "") + (d.description || "")) ? "rtl" : "ltr";
+  }
+
+  function runTldr(d, btn, box) {
+    const my = token;
+    btn.disabled = true;
+    btn.textContent = "Summarizing…";
+    box.hidden = false;
+    box.replaceChildren(el("div", "tldr-label", "TL;DR"), el("div", "tldr-wait", "Asking Claude…"));
+    chrome.runtime.sendMessage({ type: "hp:summarize", url: d.url, title: d.title, text: d.fullText }, (res) => {
+      if (my !== token) return; // card moved on to another link
+      const err = chrome.runtime.lastError ? chrome.runtime.lastError.message : res && res.error;
+      if (err || !res) {
+        const msg = err === "no-key" ? "Add your Claude API key: click the Headline Peek icon in the toolbar." : `Couldn't summarize: ${err || "no response"}`;
+        box.replaceChildren(el("div", "tldr-label", "TL;DR"), el("div", "err", msg));
+        btn.disabled = false;
+        btn.textContent = "✨ TL;DR";
+        return;
+      }
+      const ul = el("ul");
+      for (const b of res.bullets) ul.append(el("li", "", b));
+      box.replaceChildren(el("div", "tldr-label", "TL;DR"), ul);
+      btn.remove();
+    });
   }
 
   function position(link) {
@@ -252,18 +296,19 @@
     card.style.width = w + "px";
     card.style.maxHeight = "";
     const ch = Math.min(card.offsetHeight || 300, vh - 16);
-    let left = Math.min(Math.max(8, r.left), vw - w - 8);
-    let top;
+    const left = Math.min(Math.max(8, r.left), vw - w - 8);
     const below = vh - r.bottom - 8, above = r.top - 8;
+    card.style.left = left + "px";
+    // Anchor to the link's edge so the card grows away from it (e.g. when a TL;DR is added)
     if (below >= ch || below >= above) {
-      top = r.bottom + 6;
+      card.style.top = r.bottom + 6 + "px";
+      card.style.bottom = "auto";
       card.style.maxHeight = Math.max(160, below - 6) + "px";
     } else {
+      card.style.top = "auto";
+      card.style.bottom = vh - r.top + 6 + "px";
       card.style.maxHeight = Math.max(160, above - 6) + "px";
-      top = Math.max(8, r.top - 6 - Math.min(ch, above - 6));
     }
-    card.style.left = left + "px";
-    card.style.top = top + "px";
   }
 
   async function show(link, url) {
@@ -357,6 +402,17 @@
   .err { color: #8a4b00; font-size: 13px; }
   .open { display: inline-block; margin-top: 2px; font-size: 13px; font-weight: 600; color: #1a5fd0; text-decoration: none; }
   .open:hover { text-decoration: underline; }
+  .foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 4px; }
+  .tldr-btn { font: 600 12.5px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #fff; background: #1a5fd0;
+    border: 0; border-radius: 999px; padding: 7px 12px; cursor: pointer; }
+  .tldr-btn:hover { background: #154fae; }
+  .tldr-btn:disabled { opacity: .7; cursor: progress; }
+  .tldr { background: #eef4ff; border-radius: 8px; padding: 9px 11px; margin: 4px 0 10px; cursor: default; }
+  .tldr[hidden] { display: none; }
+  .tldr-label { font-size: 11px; font-weight: 700; letter-spacing: .05em; color: #1a5fd0; margin-bottom: 4px; }
+  .tldr ul { margin: 0; padding-inline-start: 18px; }
+  .tldr li { margin: 3px 0; font-size: 13.5px; color: #1a1a1a; }
+  .tldr-wait { font-size: 13px; color: #555; }
   .skeleton i { display: block; height: 12px; margin: 8px 0; border-radius: 6px;
     background: linear-gradient(90deg,#eee 0%,#f6f6f6 50%,#eee 100%); background-size: 200% 100%; animation: hp-sh 1s linear infinite; }
   .skeleton i.short { width: 60%; }
@@ -365,6 +421,7 @@
     .card { background: #1f2023; color: #ececec; border-color: rgba(255,255,255,.12); }
     .site { color: #a0a0a0; } .desc { color: #ddd; } .text p { color: #c8c8c8; }
     .open { color: #7fb0ff; } .err { color: #f0b46a; }
+    .tldr { background: #23314a; } .tldr li { color: #e6e6e6; } .tldr-label { color: #8db8ff; } .tldr-wait { color: #bbb; }
     .skeleton i { background: linear-gradient(90deg,#2b2c30 0%,#36373c 50%,#2b2c30 100%); background-size: 200% 100%; }
   }`;
 })();
