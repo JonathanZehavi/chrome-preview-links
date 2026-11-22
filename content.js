@@ -303,28 +303,123 @@
     return [...new Set(lines)].join("\n");
   }
 
-  function runTldr(d, btn, box) {
+  // TL;DR engines, in order: Claude (only if you saved an API key), Chrome's built-in AI (free,
+  // on-device, when your computer and the language support it), key sentences (free, always works).
+  async function runTldr(d, btn, box) {
     const my = token;
+    const text = summaryText(d);
+    const label = (src) => el("div", "tldr-label", src ? `TL;DR · ${src}` : "TL;DR");
+    const status = (msg) => my === token && box.replaceChildren(label(), el("div", "tldr-wait", msg));
     btn.disabled = true;
     btn.textContent = "Summarizing…";
     box.hidden = false;
-    box.replaceChildren(el("div", "tldr-label", "TL;DR"), el("div", "tldr-wait", "Asking Claude…"));
-    chrome.runtime.sendMessage({ type: "hp:summarize", url: d.url, title: d.title, text: summaryText(d) }, (res) => {
-      if (my !== token) return; // card moved on to another link
-      const err = chrome.runtime.lastError ? chrome.runtime.lastError.message : res && res.error;
-      if (err || !res) {
-        const msg = err === "no-key" ? "Add your Claude API key: click the Headline Peek icon in the toolbar." : `Couldn't summarize: ${err || "no response"}`;
-        box.replaceChildren(el("div", "tldr-label", "TL;DR"), el("div", "err", msg));
-        btn.disabled = false;
-        btn.textContent = "✨ TL;DR";
-        return;
-      }
-      const ul = el("ul");
-      for (const b of res.bullets) ul.append(el("li", "", b));
-      box.replaceChildren(el("div", "tldr-label", "TL;DR"), ul);
-      btn.remove();
-    });
+    status("Summarizing…");
+
+    let result = null;
+    const claude = await askBackground({ type: "hp:summarize", url: d.url, title: d.title, text });
+    if (claude.bullets) result = { bullets: claude.bullets, source: "Claude" };
+    else if (claude.error && claude.error !== "no-key") result = { error: claude.error };
+    else if (text.length < 200) result = { error: "this site doesn't put the article text in its page, so there's nothing to summarize." };
+    else {
+      const ai = await chromeAiSummary(text, d.title, status).catch(() => null);
+      result = ai ? { bullets: ai, source: "Chrome AI" } : { bullets: keySentences(text, d.title), source: "key sentences" };
+    }
+
+    if (my !== token) return; // card moved on to another link
+    if (result.error || !result.bullets || !result.bullets.length) {
+      box.replaceChildren(label(), el("div", "err", `Couldn't summarize: ${result.error || "no summary"}`));
+      btn.disabled = false;
+      btn.textContent = "✨ TL;DR";
+      return;
+    }
+    const ul = el("ul");
+    for (const b of result.bullets) ul.append(el("li", "", b));
+    box.replaceChildren(label(result.source), ul);
+    btn.remove();
+    // The summary replaces the opening paragraphs, which would otherwise repeat it
+    const preview = card.querySelector(".text");
+    if (preview) preview.remove();
   }
+
+  function askBackground(msg) {
+    return new Promise((resolve) =>
+      chrome.runtime.sendMessage(msg, (res) => resolve(chrome.runtime.lastError ? { error: chrome.runtime.lastError.message } : res || { error: "no response" }))
+    );
+  }
+
+  function guessLang(text) {
+    if (/[\u0590-\u05FF]/.test(text)) return "he";
+    if (/[\u0600-\u06FF]/.test(text)) return "ar";
+    return (document.documentElement.lang || "en").slice(0, 2).toLowerCase();
+  }
+
+  // Chrome's built-in Summarizer (Gemini Nano). Returns null whenever it can't be used,
+  // so the caller falls back to key sentences.
+  async function chromeAiSummary(text, title, status) {
+    if (typeof Summarizer === "undefined") return null;
+    const lang = guessLang(text);
+    const opts = { type: "key-points", format: "plain-text", length: "short", expectedInputLanguages: [lang], outputLanguage: lang };
+    const availability = await Summarizer.availability(opts);
+    if (availability === "unavailable") return null;
+    if (availability !== "available") status("Chrome is downloading its free built-in AI model (one time)…");
+    const summarizer = await Summarizer.create({
+      ...opts,
+      sharedContext: "A news article. Summarize its main facts for a reader skimming headlines.",
+      monitor(m) {
+        m.addEventListener("downloadprogress", (e) => status(`Chrome is downloading its free built-in AI model (one time)… ${Math.round((e.loaded || 0) * 100)}%`));
+      },
+    });
+    try {
+      let input = `${title || ""}\n${text}`.slice(0, 12_000);
+      // Stay within the model's input limit
+      if (summarizer.inputQuota && summarizer.measureInputUsage) {
+        while (input.length > 1000 && (await summarizer.measureInputUsage(input)) > summarizer.inputQuota) input = input.slice(0, Math.floor(input.length * 0.75));
+      }
+      const out = await summarizer.summarize(input);
+      const bullets = String(out || "")
+        .split("\n")
+        .map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim())
+        .filter(Boolean)
+        .slice(0, 5);
+      return bullets.length ? bullets : null;
+    } finally {
+      summarizer.destroy && summarizer.destroy();
+    }
+  }
+
+  // Free, offline, any language: picks the 3 most representative sentences, kept in article order.
+  const STOPWORDS = new Set(("the a an and or but of to in on at for with by from as is are was were be been it its this that these those he she they we you i his her their our " +
+    "has have had will would can could not no said says say also than then there here who what when where which while after before about over into more most new " +
+    "של את על עם אל כי לא גם הוא היא הם הן אני אתה זה זו זאת יש אין היה היתה היו או אבל אם כל כך עוד רק מה מי כמו לפי בין אחרי לפני אמר אמרה אמרו כבר יותר שלא").split(/\s+/));
+
+  function keySentences(text, title) {
+    const sentences = text
+      .split(/\n+/)
+      .flatMap((para) => para.split(/(?<=[.!?。]["'”’)]*)\s+/)) // split at end punctuation followed by a space, so "1.2%" stays intact
+      .map(clean)
+      .filter((t) => t.length >= 40 && t.length <= 400 && !BOILERPLATE.test(t));
+    if (sentences.length <= 3) return sentences;
+
+    const words = (t) => (t.toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || []).filter((w) => !STOPWORDS.has(w));
+    const freq = new Map();
+    for (const t of sentences) for (const w of new Set(words(t))) freq.set(w, (freq.get(w) || 0) + 1);
+    const titleWords = new Set(words(title || ""));
+    const scored = sentences.map((t, i) => {
+      const ws = words(t);
+      if (!ws.length) return { t, i, score: 0 };
+      let score = ws.reduce((sum, w) => sum + (freq.get(w) || 0), 0) / Math.sqrt(ws.length);
+      score += 2 * ws.filter((w) => titleWords.has(w)).length; // relevance to the headline
+      score *= 1 + 0.8 / (1 + i * 0.5); // news puts key facts first
+      if (/\d/.test(t)) score *= 1.1; // numbers are usually concrete facts
+      return { t, i, score };
+    });
+    return scored
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3)
+      .sort((a, b) => a.i - b.i)
+      .map((x) => x.t);
+  }
+
 
   function position(link) {
     const r = link.getBoundingClientRect();

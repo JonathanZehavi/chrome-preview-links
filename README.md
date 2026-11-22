@@ -24,16 +24,16 @@ npm install && npm run build
 - The page is parsed with `DOMParser` (no scripts run), and the card is built from Open Graph / Twitter meta tags, JSON-LD `NewsArticle` data and the first paragraphs of the article body.
 - The card lives in a closed Shadow DOM, so site CSS can't break it. Hebrew/Arabic previews switch to right-to-left.
 
-## TL;DR summaries (optional)
+## TL;DR summaries
 
-Press **✨ TL;DR** on a preview card to get a 3-bullet summary of the full article from Claude, in the article's language.
+Press **✨ TL;DR** on a preview card for a short summary. It's free by default, with no setup:
 
-1. Create an API key at console.anthropic.com (it needs credit on the account).
-2. Click the Headline Peek toolbar icon, paste the key, and press **Save**.
-3. Pick a model: **Opus 5.5** (best quality, about $0.02 per summary) or **Haiku 5.5** (about $0.0005 per summary). These are rough estimates for an average article.
+1. **Chrome's built-in AI** (Gemini Nano, runs on your computer) is used when your Chrome, hardware and the article's language support it. The first use downloads the model once.
+2. Otherwise, **key sentences**: the 3 most representative sentences of the article, picked offline. Works in any language, including Hebrew, on any computer.
 
-Summaries only run when you press the button, never on hover. Each one is saved, so reopening the same article costs nothing.
-The key is stored in `chrome.storage.local` in this browser profile (not synced) and is sent only to `api.anthropic.com`.
+The label shows which one produced the summary (`TL;DR · Chrome AI` / `TL;DR · key sentences`).
+
+**Optional, paid:** paste a Claude API key (from console.anthropic.com) in the popup for real rewritten summaries in the article's language. Pick Opus 5.5 (best, about $0.02 per summary) or Haiku 5.5 (about $0.0005). These are rough estimates. Claude summaries are cached per article. The key is stored in `chrome.storage.local` in this browser profile (not synced) and sent only to `api.anthropic.com`. Clear the field and press Save to go back to free.
 
 ## Settings (toolbar icon)
 

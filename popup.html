@@ -9,6 +9,7 @@
     .host { color: #666; font-size: 12px; word-break: break-all; }
     input[type=range] { width: 110px; }
     h2 { font-size: 13px; margin: 16px 0 4px; padding-top: 12px; border-top: 1px solid rgba(128,128,128,.3); }
+    h2.sub { font-size: 12px; font-weight: 600; border-top: 0; padding-top: 0; margin-top: 12px; }
     label.col { flex-direction: column; align-items: stretch; gap: 4px; }
     .row { display: flex; gap: 6px; }
     #apiKey { flex: 1; min-width: 0; padding: 4px 6px; font: inherit; }
@@ -23,8 +24,10 @@
   <label><span>On this site<br><span class="host" id="host">—</span></span> <input type="checkbox" id="site"></label>
   <label>Only headline links <input type="checkbox" id="headlinesOnly"></label>
   <label>Hover delay <span><input type="range" id="delay" min="150" max="1500" step="50"> <span id="delayVal"></span></span></label>
-  <h2>TL;DR (Claude)</h2>
-  <label class="col">Claude API key
+  <h2>TL;DR summaries</h2>
+  <div class="hint" style="margin-top:4px">Free, no setup: uses Chrome's built-in AI when your computer supports it, otherwise picks the article's 3 key sentences.</div>
+  <h2 class="sub">Optional: better summaries with Claude (paid)</h2>
+  <label class="col">Claude API key (leave empty to stay free)
     <span class="row"><input type="password" id="apiKey" placeholder="sk-ant-..." autocomplete="off" spellcheck="false"><button id="saveKey" type="button">Save</button></span>
     <span class="host" id="keyStatus"></span>
   </label>
@@ -34,7 +37,7 @@
       <option value="claude-haiku-5-5">Haiku 5.5 (cheapest)</option>
     </select>
   </label>
-  <div class="hint">Get a key at console.anthropic.com. It's stored only in this browser and sent only to Anthropic. Don't share this extension folder with your key in it.</div>
+  <div class="hint">Keys come from console.anthropic.com and are billed per use. To go back to free, clear the field and press Save. The key is stored only in this browser and sent only to Anthropic. Don't share this extension folder with your key in it.</div>
   <div class="hint">Hover a headline for a moment to see a preview. Press Esc to close it.</div>
   <script src="popup.js"></script>
 </body>
