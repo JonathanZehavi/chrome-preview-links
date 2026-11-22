@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; width: 260px; margin: 0; padding: 14px; color: #1a1a1a; background: #fff; }
+    h1 { font-size: 15px; margin: 0 0 12px; }
+    label { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 10px 0; }
+    .host { color: #666; font-size: 12px; word-break: break-all; }
+    input[type=range] { width: 110px; }
+    .hint { color: #777; font-size: 11.5px; margin-top: 12px; }
+    @media (prefers-color-scheme: dark) { body { background: #1f2023; color: #ececec; } .host, .hint { color: #aaa; } }
+  </style>
+</head>
+<body>
+  <h1>Headline Peek</h1>
+  <label>Enabled everywhere <input type="checkbox" id="enabled"></label>
+  <label><span>On this site<br><span class="host" id="host">—</span></span> <input type="checkbox" id="site"></label>
+  <label>Only headline links <input type="checkbox" id="headlinesOnly"></label>
+  <label>Hover delay <span><input type="range" id="delay" min="150" max="1500" step="50"> <span id="delayVal"></span></span></label>
+  <div class="hint">Hover a headline for a moment to see a preview. Press Esc to close it.</div>
+  <script src="popup.js"></script>
+</body>
+</html>
