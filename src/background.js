@@ -53,7 +53,7 @@ async function summarize({ url, title, text }) {
   if (summaries[cacheKey]) return { bullets: summaries[cacheKey].bullets, cached: true };
 
   const body = String(text || "").slice(0, MAX_ARTICLE_CHARS);
-  if (body.length < 200) return { bullets: ["Not enough article text to summarize."] };
+  if (body.length < 200) return { error: "this site doesn't put the article text in its page, so there's nothing to summarize." };
 
   const client = new Anthropic({
     apiKey,

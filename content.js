@@ -132,16 +132,46 @@
     if (ld && ld.articleBody && ld.articleBody.length > 200) {
       return { paragraphs: previewParagraphs(ld.articleBody.split(/\n+/), description), fullText: ld.articleBody.slice(0, FULL_LIMIT) };
     }
+    const embedded = embeddedJsonText(doc); // read before scripts are stripped below
     doc.querySelectorAll("script, style, noscript, nav, footer, header, aside, form, figure, [aria-hidden=true]").forEach((n) => n.remove());
     const container =
       doc.querySelector('[itemprop="articleBody"], [data-testid*="article-body" i], .article-body, .article__body, .story-body, .post-content, .entry-content') ||
       doc.querySelector("article") ||
       doc.querySelector("main, [role=main]") ||
       doc.body;
-    if (!container) return { paragraphs: [], fullText: "" };
-    const texts = [...container.querySelectorAll("p, h2, h3, li")].map((n) => clean(n.textContent)).filter((t) => t.length >= 40 && !BOILERPLATE.test(t));
-    const unique = [...new Set(texts)];
+    const texts = container ? [...container.querySelectorAll("p, h2, h3, li")].map((n) => clean(n.textContent)).filter((t) => t.length >= 40 && !BOILERPLATE.test(t)) : [];
+    let unique = [...new Set(texts)];
+    // Sites that render the article with JavaScript ship its text in a JSON data block instead of the HTML.
+    if (unique.join(" ").length < 400 && embedded.join(" ").length > unique.join(" ").length) unique = embedded;
     return { paragraphs: previewParagraphs(unique, description), fullText: unique.join("\n").slice(0, FULL_LIMIT) };
+  }
+
+  // Collects long prose strings from JSON data blocks (e.g. __NEXT_DATA__, application/json, inline state).
+  function embeddedJsonText(doc) {
+    const out = [];
+    const seen = new Set();
+    let total = 0;
+    const visit = (v, depth) => {
+      if (total > 30_000 || depth > 40 || v == null) return;
+      if (typeof v === "string") {
+        if (v.length < 60 || /^(https?:|\/|data:|\{|\[)/.test(v)) return;
+        const t = clean(v.includes("<") ? new DOMParser().parseFromString(v, "text/html").body.textContent : v);
+        // Prose: has spaces and sentence punctuation, isn't code/CSS/base64
+        if (t.length < 60 || (t.match(/ /g) || []).length < 8 || !/[.!?,،׃:]/.test(t) || /[{};=]{2}|function\s*\(/.test(t)) return;
+        if (BOILERPLATE.test(t) && t.length < 200) return;
+        for (const part of t.split(/\n+/)) {
+          const p = clean(part);
+          if (p.length >= 40 && !seen.has(p)) { seen.add(p); out.push(p); total += p.length; }
+        }
+        return;
+      }
+      if (Array.isArray(v)) { for (const x of v) visit(x, depth + 1); return; }
+      if (typeof v === "object") for (const k in v) visit(v[k], depth + 1);
+    };
+    for (const s of doc.querySelectorAll('script#__NEXT_DATA__, script[type="application/json"], script[type="application/ld+json"]')) {
+      try { visit(JSON.parse(s.textContent), 0); } catch {}
+    }
+    return out;
   }
 
   function previewParagraphs(candidates, description) {
@@ -249,7 +279,7 @@
     const foot = el("div", "foot");
     const open = el("a", "open", "Open article →");
     open.href = d.url;
-    if ((d.fullText || "").length >= 200) {
+    {
       const btn = el("button", "tldr-btn", "✨ TL;DR");
       btn.type = "button";
       btn.title = "Summarize this article with Claude";
@@ -266,13 +296,20 @@
     card.dir = /[֐-ࣿ]/.test((d.title || "") + (d.description || "")) ? "rtl" : "ltr";
   }
 
+  // Full article text if we found it; otherwise whatever the card has.
+  function summaryText(d) {
+    if ((d.fullText || "").length >= 400) return d.fullText;
+    const lines = [d.description, ...(d.paragraphs || []), ...(d.fullText || "").split("\n")].map(clean).filter(Boolean);
+    return [...new Set(lines)].join("\n");
+  }
+
   function runTldr(d, btn, box) {
     const my = token;
     btn.disabled = true;
     btn.textContent = "Summarizing…";
     box.hidden = false;
     box.replaceChildren(el("div", "tldr-label", "TL;DR"), el("div", "tldr-wait", "Asking Claude…"));
-    chrome.runtime.sendMessage({ type: "hp:summarize", url: d.url, title: d.title, text: d.fullText }, (res) => {
+    chrome.runtime.sendMessage({ type: "hp:summarize", url: d.url, title: d.title, text: summaryText(d) }, (res) => {
       if (my !== token) return; // card moved on to another link
       const err = chrome.runtime.lastError ? chrome.runtime.lastError.message : res && res.error;
       if (err || !res) {
